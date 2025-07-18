@@ -31,3 +31,48 @@ def get_optimal_device():
     if memory_gb < 10:
         print("⚠️ Warning: Low memory detected (<10GB). Consider reducing batch size or model size.")
     return device
+
+
+# Mixed Precision for M1 
+
+class MacM1MixedPrecision:
+    def __init__(self, enabled=True):
+        self.enabled = enabled
+        self.scale = 256.0
+        self.growth_factor = 2.0
+        self.backoff_factor = 0.5
+        self.growth_interval = 2000
+        self.scale_growth_tracker = 0
+
+    def scale_loss(self, loss):
+        if self.enabled:
+            return loss * self.scale
+        
+    def unscale_gradients(self, optimizer):
+        if self.enabled:
+            for group in optimizer.param_groups:
+                for param in group['params']:
+                    if param.grad is not None:
+                        param.grad.data.div_(self.scale)
+
+    def update_scale(self, found_inf):
+        if not self.enabled:
+            return 
+        if found_inf:
+            self.scale = max(self.scale * self.backoff_factor, 1.0)
+            self.scale_growth_tracker = 0
+        else:
+            self.scale_growth_tracker +=1
+            if self.scale_growth_tracker >= self.growth_interval:
+                self.scale += self.scale_growth_tracker
+                self.scale_growth_tracker = 0
+    
+    def check_overflow(self, parameters):
+        if not self.enabled:
+            return False
+        for param in parameters:
+            if param.grad is not None:
+                if torch.isnan(param.grad.data).any() or torch.isinf(param.grad.data).any():
+                    return True
+        return False
+    
