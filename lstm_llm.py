@@ -152,3 +152,22 @@ class EnhancedNextWordLSTM(nn.Module):
         new_fc.bias.data[:old_vocab_size] = self.fc.bias.data
         nn.init.constant_(new_fc.bias.data[old_vocab_size:], 0)
         self.fc = new_fc.to(device)
+
+
+        #Class for DataSets
+
+        class TextDataset(Dataset):
+            def __init__(self, sequences, targets):
+                self.sequences = np.array(sequences, dtype=np.int32)
+                self.targets = np.array(targets, dtype=np.int32)
+                self.num_sequences = len(self.targets)
+
+            def __len__(self):
+                return self.num_sequences
+            
+            def __getitem__(self, idx):
+                seq = torch.tensor(self.sequences[idx], type=torch.long)
+                target = torch.tensor(self.targets[idx], dtype=torch.long)
+                return seq, target
+            
+
