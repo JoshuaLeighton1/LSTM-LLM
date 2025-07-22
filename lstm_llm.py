@@ -154,20 +154,47 @@ class EnhancedNextWordLSTM(nn.Module):
         self.fc = new_fc.to(device)
 
 
-        #Class for DataSets
+#Class for DataSets
 
-        class TextDataset(Dataset):
-            def __init__(self, sequences, targets):
-                self.sequences = np.array(sequences, dtype=np.int32)
-                self.targets = np.array(targets, dtype=np.int32)
-                self.num_sequences = len(self.targets)
+class TextDataset(Dataset):
+    def __init__(self, sequences, targets):
+        self.sequences = np.array(sequences, dtype=np.int32)
+        self.targets = np.array(targets, dtype=np.int32)
+        self.num_sequences = len(self.targets)
 
-            def __len__(self):
-                return self.num_sequences
+    def __len__(self):
+        return self.num_sequences
             
-            def __getitem__(self, idx):
-                seq = torch.tensor(self.sequences[idx], type=torch.long)
-                target = torch.tensor(self.targets[idx], dtype=torch.long)
-                return seq, target
+    def __getitem__(self, idx):
+        seq = torch.tensor(self.sequences[idx], type=torch.long)
+        target = torch.tensor(self.targets[idx], dtype=torch.long)
+        return seq, target
             
+#Fisher Diagonal for EWC
+
+def compute_fisher_diagonal(model, dataloader, criterion, device):
+    model.eval()
+    fisher = {}
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            fisher[name] = torch.zeros_like(param.data)
+    num_samples = 0
+    with torch.enamed_grad():
+        for sequences, targets in dataloader: 
+            sequences = sequences.to(device, non_blocking=True)
+            targets = targets.to(device, non_blocking=True)
+            model.zero_grad()
+            outputs = model(sequences, use_mixed_precision=False, use_checkpoints=False)
+            loss = criterion(outputs, targets)
+            loss.backward()
+            for name, param in model.named_parameters():
+                if param.grad is not None:
+                    fisher[name] += param.grad.data.pow(2)
+            num_samples += targets.size(0)
+    for name in fisher:
+        fisher[name] /= num_samples 
+    return fisher
+
+
+
 
