@@ -239,7 +239,7 @@ def train_epoch(model, dataloader, criterion, optimizer, device, mixed_precision
         mixed_precision.update_scale(found_inf)
         num_batches +=1
 
-        if (batch_idx + 1) % 50 == 0"
+        if (batch_idx + 1) % 50 == 0:
             if device.type == 'mps': 
                 torch.mps.empty_cache()
             elif device.type == 'cuda': 
