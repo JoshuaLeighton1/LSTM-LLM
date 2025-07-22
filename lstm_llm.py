@@ -7,6 +7,7 @@ from torch.cuda.amp import autocast
 import numpy as np
 import random
 import psutil
+import gc
 
 
 
@@ -196,5 +197,58 @@ def compute_fisher_diagonal(model, dataloader, criterion, device):
     return fisher
 
 
+# training function 
+
+def train_epoch(model, dataloader, criterion, optimizer, device, mixed_precision, prev_params=None, fisher=None, lambda_ewc=1e1, old_vocab_size=None):
+    model.train()
+    total_loss = 0
+    num_batches = 0
+    overflow_count = 0
+
+    for batch_idx, (sequences, targets) in enumerate(dataloader):
+        sequences = sequences.to(device, non_blocking=True)
+        targets = targets.to(device, non_blocking=True)
+
+        optimizer.zero_grad()
+        outputs = model(sequences, use_mixed_precision=mixed_precision.enabled)
+        loss = criterion(outputs, targets)
+
+        if prev_params is not None and fisher is not None and old_vocab_size is not None:
+            ewc_loss = 0
+            for name, param in model.named_parameters():
+                if name in prev_params and name in fisher:
+                    if name in ['embedding.weight', 'fc.weight', 'fc.bias']:
+                        ewc_loss += (fisher[name][:old_vocab_size] * (param[:old_vocab_size] - prev_params[name][:old_vocab_size]).pow(2)).sum()
+                    else:
+                        ewc_loss += (fisher[name] * (param - prev_params[name]).pow(2)).sum()
+
+            loss += (lambda_ewc / 2 ) * ewc_loss
+
+        scaled_loss = mixed_precision.scale_loss(loss)
+        scaled_loss.backward()
+
+        found_inf = mixed_precision.check_overflow(model.parameters())
+        if not found_inf:
+            mixed_precision.unscale_gradients(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+            total_loss += loss.item()
+        else:
+            overflow_count +=1
+
+        mixed_precision.update_scale(found_inf)
+        num_batches +=1
+
+        if (batch_idx + 1) % 50 == 0"
+            if device.type == 'mps': 
+                torch.mps.empty_cache()
+            elif device.type == 'cuda': 
+                torch.cuda.empty_cache()
+            gc.collect()
+    
+    avg_loss = total_loss / max(num_batches - overflow_count, 1)
+    if overflow_count > 0:
+        print(f" Gradient overflows: {overflow_count}/{num_batches}")
+    return avg_loss
 
 
