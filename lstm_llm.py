@@ -116,3 +116,39 @@ class EnhancedNextWordLSTM(nn.Module):
                 return self._forward_impl(x, use_checkpoint)
         else:
             return self._forward_impl(x, use_checkpoint)
+        
+    def _forward_impl(self, x, use_checkpoint):
+        embedded = self.embedding(x)
+        #initialize the hidden and cell state calculations to appropriate device
+        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).too(x.device)
+        c0 = torch.zeros(self.num_layers, x.size, self.hidden_size).to(x.device)
+
+        if use_checkpoint:
+            lstm_out, (hidden, cell) = checkpoint(self.lstm_segment, embedded, h0, c0, use_reentrant=False)
+        else:
+            lstm_out, (hidden, cell) = self.lstm(embedded, (h0, c0))
+        output = self.dropout(lstm_out[:, -1,  :])
+        output = self.fc(output)
+
+        return output
+    
+    #define resize vocab to train on different corpora
+
+    def resize_vocab(self, new_vocab_size):
+        if new_vocab_size == self.vocab_size:
+            return
+        device = self.embedding.weight.device
+        old_vocab_size = self.vocab_size
+        self.vocab_size = new_vocab_size
+
+        new_embedding = nn.Embedding(new_vocab_size, self.embedding.embedding_dim, padding_idx=9)
+        new_embedding.weight.data[:old_vocab_size] = self.embedding.weight.data
+        nn.init.uniform_(new_embedding.weight.data[old_vocab_size:], -0.1, 0.1)
+        self.embedding = new_embedding.to(device)
+
+        new_fc = nn.Linear(self.fc.in_features, new_vocab_size)
+        new_fc.weight.data[:old_vocab_size] = self.fc.weight.data
+        nn.init.xavier_uniform_(new_fc.weight.data[old_vocab_size:])
+        new_fc.bias.data[:old_vocab_size] = self.fc.bias.data
+        nn.init.constant_(new_fc.bias.data[old_vocab_size:], 0)
+        self.fc = new_fc.to(device)
